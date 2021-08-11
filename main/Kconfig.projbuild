@@ -1,0 +1,17 @@
+menu "ATMEGA Logger Confguration"
+	config WIFI_SSID
+	    string "WiFi SSID"
+	    default "myssid"
+	
+	config WIFI_PASSWORD
+	    string "WiFi Password"
+	    default "mypassword"
+	    
+	config TCP_LISTEN_PORT
+		int "Port to listen"
+		default 0
+	    
+	config GPIO_LISTEN
+		int "GPIO conntected to ATMEGA"
+		default 0
+endmenu
