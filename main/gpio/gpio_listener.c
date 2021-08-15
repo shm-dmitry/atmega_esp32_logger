@@ -12,39 +12,43 @@
 #define GPIO_LISTENER_DATA_MAX_ROW_SIZE 250
 #define GPIO_LISTENER_MAX_COLLECTING_MESSAGE_TIME 10
 
+static volatile bool gpio_listener_on_reading_char = false;
 static volatile uint8_t gpio_listener_char = 0;
-static volatile bool gpio_listener_on_receiving_char = false;
 static xQueueHandle gpio_listener_evt_queue = NULL;
-static gpio_listener_data_t last_row = { .data = { 0 }, .size = 0, .start_collecting = 0 };
 
 static gpio_listener_callback_t gpio_listener_callback;
 
 static void IRAM_ATTR gpio_listener_isr_handler(void* arg) {
 	gpio_listener_char++;
-	gpio_listener_on_receiving_char = true;
+	gpio_listener_on_reading_char = true;
 }
 
 static void gpio_listener_on_new_char(void* arg) {
+	gpio_listener_data_t last_row = { .data = { 0 }, .size = 0, .start_collecting = 0 };
+
 	while(true) {
 		vTaskDelay(GPIO_LISTENER_CHAR_DELIMETER_PERIOD_MS / portTICK_PERIOD_MS);
-
-		if (gpio_listener_on_receiving_char) {
-			gpio_listener_on_receiving_char = false;
-		} else if (gpio_listener_char > 0) {
-			uint8_t current_char = gpio_listener_char;
-			gpio_listener_char = 0;
-
+		if (gpio_listener_on_reading_char) {
+			gpio_listener_on_reading_char = false;
+		} else {
 			time_t now;
 			time(&now);
 
-			if (last_row.size == 0) {
-				last_row.start_collecting = now;
+			if (gpio_listener_char > 0) {
+				uint8_t current_char = gpio_listener_char;
+				gpio_listener_char = 0;
+
+				if (last_row.size == 0) {
+					last_row.start_collecting = now;
+				}
+
+				last_row.data[last_row.size] = current_char;
+				last_row.size++;
 			}
 
-			last_row.data[last_row.size] = current_char;
-			last_row.size++;
-
-			if (last_row.size > GPIO_LISTENER_DATA_MAX_ROW_SIZE || current_char == '\n' || now - last_row.start_collecting > GPIO_LISTENER_MAX_COLLECTING_MESSAGE_TIME) {
+			if (last_row.size > GPIO_LISTENER_DATA_MAX_ROW_SIZE ||
+					(last_row.size > 0 && last_row.data[last_row.size - 1] == '\n') ||
+					now - last_row.start_collecting > GPIO_LISTENER_MAX_COLLECTING_MESSAGE_TIME) {
 				gpio_listener_data_t * temp = malloc(sizeof(gpio_listener_data_t));
 				memcpy(temp, &last_row, sizeof(gpio_listener_data_t));
 				memset(&last_row, 0, sizeof(gpio_listener_data_t));
@@ -53,7 +57,7 @@ static void gpio_listener_on_new_char(void* arg) {
 
 				free(temp);
 			}
-		}
+        }
 	}
 }
 
@@ -96,8 +100,8 @@ esp_err_t gpio_listener_init(int gpio, gpio_listener_callback_t callback) {
 	}
 
 	gpio_listener_evt_queue = xQueueCreate(30, sizeof(gpio_listener_data_t));
-	xTaskCreate(gpio_listener_on_new_char, "gpio_listener_on_new_char", 1024, NULL, 10, NULL);
-	xTaskCreate(gpio_listener_on_process_char, "gpio_listener_on_process_char", 1024, NULL, 10, NULL);
+	xTaskCreate(gpio_listener_on_new_char, "gpio_on_new_char", 4096, NULL, 10, NULL);
+	xTaskCreate(gpio_listener_on_process_char, "gpio_on_process_char", 4096, NULL, 10, NULL);
 
 	res = gpio_install_isr_service(0);
 	if (res) {
